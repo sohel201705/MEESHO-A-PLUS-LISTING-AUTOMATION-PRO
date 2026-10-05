@@ -1,114 +1,286 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
     function isAdmin() {
-      return request.auth != null
-        && request.auth.uid == "1xoVNw3HMcdmO0n7dB0iDMDYj9r1";
+      return signedIn()
+        && request.auth.uid == "ANzaRtHgkJXlcPO8NmhzuAJ0b5C3";
+    }
+
+    function sameUser(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function planDoc(planId) {
+      return get(/databases/$(database)/documents/plans/$(planId));
+    }
+
+    function membershipDoc(uid) {
+      return get(/databases/$(database)/documents/memberships/$(uid));
+    }
+
+    function activeMembership(uid) {
+      let m = membershipDoc(uid);
+      return sameUser(uid)
+        && m.exists()
+        && m.data.status == "ACTIVE"
+        && (
+          m.data.expiryDate == null
+          || m.data.expiryDate > request.time
+        );
+    }
+
+    function slotAllowed(slot, deviceLimit) {
+      return (slot == "1" && deviceLimit >= 1)
+        || (slot == "2" && deviceLimit >= 2)
+        || (slot == "3" && deviceLimit >= 3);
+    }
+
+    function keyAfter(code) {
+      return getAfter(
+        /databases/$(database)/documents/activationKeys/$(code)
+      );
     }
 
     match /admins/{uid} {
-      allow read, write: if isAdmin();
+      allow get: if isAdmin() && uid == request.auth.uid;
+      allow list, create, update, delete: if isAdmin();
     }
 
     match /users/{uid} {
-      allow read: if isAdmin() || (request.auth != null && request.auth.uid == uid);
-      allow create: if request.auth != null && request.auth.uid == uid;
+      allow read: if isAdmin() || sameUser(uid);
+
+      allow create: if isAdmin() || (
+        sameUser(uid)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+      );
+
       allow update: if isAdmin() || (
-        request.auth != null && request.auth.uid == uid &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          "name", "email", "displayName", "lastLoginAt", "updatedAt"
+        sameUser(uid)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "name",
+          "displayName",
+          "lastLoginAt",
+          "updatedAt"
         ])
       );
+
       allow delete: if isAdmin();
     }
 
     match /plans/{id} {
-      allow read: if isAdmin() || request.auth != null;
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /settings/{id} {
+      allow read: if signedIn();
       allow write: if isAdmin();
     }
 
     match /activationKeys/{code} {
-      allow read: if isAdmin() || (
-        request.auth != null &&
-        resource.data.status == "AVAILABLE" &&
-        resource.data.targetEmail == request.auth.token.email
-      );
-      allow create, delete: if isAdmin();
-      allow update: if isAdmin() || (
-        request.auth != null &&
-        resource.data.status == "AVAILABLE" &&
-        resource.data.targetEmail == request.auth.token.email &&
-        request.resource.data.status == "REDEEMED" &&
-        resource.data.keyExpiresAt > request.time &&
-        request.resource.data.redeemedByUid == request.auth.uid &&
-        request.resource.data.redeemedEmail == request.auth.token.email &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          "status", "redeemedByUid", "redeemedEmail", "redeemedAt"
+      // Admin can manage the full key lifecycle.
+      allow read, write: if isAdmin();
+
+      // Customer can only read their own currently-available key.
+      allow get: if signedIn()
+        && resource.data.status == "AVAILABLE"
+        && resource.data.targetEmail == request.auth.token.email
+        && resource.data.keyExpiresAt > request.time;
+
+      // Customer redemption: key fields are immutable, and the change must
+      // happen together with the membership write in the same atomic batch.
+      allow update: if signedIn()
+        && resource.data.status == "AVAILABLE"
+        && resource.data.targetEmail == request.auth.token.email
+        && resource.data.keyExpiresAt > request.time
+
+        && request.resource.data.status == "REDEEMED"
+        && request.resource.data.redeemedByUid == request.auth.uid
+        && request.resource.data.redeemedEmail == request.auth.token.email
+        && request.resource.data.redeemedAt == request.time
+
+        && request.resource.data.code == resource.data.code
+        && request.resource.data.targetEmail == resource.data.targetEmail
+        && request.resource.data.planId == resource.data.planId
+        && request.resource.data.planName == resource.data.planName
+        && request.resource.data.price == resource.data.price
+        && request.resource.data.offerPrice == resource.data.offerPrice
+        && request.resource.data.durationDays == resource.data.durationDays
+        && request.resource.data.shippingEnabled == resource.data.shippingEnabled
+        && request.resource.data.deviceLimit == resource.data.deviceLimit
+        && request.resource.data.keyExpiresAt == resource.data.keyExpiresAt
+        && request.resource.data.renewal == resource.data.renewal
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "status",
+          "redeemedByUid",
+          "redeemedEmail",
+          "redeemedAt",
+          "membershipStartAt",
+          "membershipExpiryAt"
         ])
-      );
+
+        && request.resource.data.membershipStartAt == request.time
+        && (
+          request.resource.data.durationDays == 0
+            ? request.resource.data.membershipExpiryAt == null
+            : request.resource.data.membershipExpiryAt ==
+                request.time + duration.value(
+                  request.resource.data.durationDays,
+                  "d"
+                )
+        );
     }
 
     match /memberships/{uid} {
-      allow read: if isAdmin() || (request.auth != null && request.auth.uid == uid);
-      allow create: if isAdmin() || (
-        request.auth != null && request.auth.uid == uid &&
-        request.resource.data.status == "ACTIVE" &&
-        request.resource.data.email == request.auth.token.email &&
-        request.resource.data.activationKeyId is string &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.status == "REDEEMED" &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.keyExpiresAt > request.time &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.redeemedByUid == request.auth.uid &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.planId == request.resource.data.planId &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.durationDays == request.resource.data.durationDays &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.shippingEnabled == request.resource.data.shippingEnabled &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.deviceLimit == request.resource.data.deviceLimit &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.membershipStartAt == request.resource.data.startDate &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.membershipExpiryAt == request.resource.data.expiryDate
-      );
-      allow update: if isAdmin() || (
-        request.auth != null && request.auth.uid == uid &&
-        resource.data.activationKeyId is string &&
-        request.resource.data.activationKeyId is string &&
-        resource.data.activationKeyId != request.resource.data.activationKeyId &&
-        request.resource.data.status == "ACTIVE" &&
-        request.resource.data.email == request.auth.token.email &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.status == "REDEEMED" &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.keyExpiresAt > request.time &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.redeemedByUid == request.auth.uid &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.planId == request.resource.data.planId &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.durationDays == request.resource.data.durationDays &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.shippingEnabled == request.resource.data.shippingEnabled &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.deviceLimit == request.resource.data.deviceLimit &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.membershipStartAt == request.resource.data.startDate &&
-        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.membershipExpiryAt == request.resource.data.expiryDate
-      );
+      allow read: if isAdmin() || sameUser(uid);
       allow delete: if isAdmin();
+
+      // Admin-only manual activation / update.
+      allow create, update: if isAdmin();
+
+      // Customer activation / renewal / upgrade must occur as one atomic batch:
+      // activationKeys/{code} -> REDEEMED
+      // memberships/{uid} -> ACTIVE
+      allow create: if sameUser(uid)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.status == "ACTIVE"
+        && request.resource.data.source == "ACTIVATION_KEY"
+        && request.resource.data.activationKeyId is string
+        && request.resource.data.activationKeyId != ""
+        && keyAfter(request.resource.data.activationKeyId).data.status == "REDEEMED"
+        && keyAfter(request.resource.data.activationKeyId).data.targetEmail == request.auth.token.email
+        && keyAfter(request.resource.data.activationKeyId).data.redeemedByUid == request.auth.uid
+        && keyAfter(request.resource.data.activationKeyId).data.redeemedEmail == request.auth.token.email
+
+        && request.resource.data.planId ==
+          keyAfter(request.resource.data.activationKeyId).data.planId
+        && request.resource.data.planName ==
+          keyAfter(request.resource.data.activationKeyId).data.planName
+        && request.resource.data.price ==
+          keyAfter(request.resource.data.activationKeyId).data.price
+        && request.resource.data.offerPrice ==
+          keyAfter(request.resource.data.activationKeyId).data.offerPrice
+        && request.resource.data.durationDays ==
+          keyAfter(request.resource.data.activationKeyId).data.durationDays
+        && request.resource.data.shippingEnabled ==
+          keyAfter(request.resource.data.activationKeyId).data.shippingEnabled
+        && request.resource.data.deviceLimit ==
+          keyAfter(request.resource.data.activationKeyId).data.deviceLimit
+
+        && request.resource.data.startDate == request.time
+        && (
+          request.resource.data.durationDays == 0
+            ? request.resource.data.expiryDate == null
+            : request.resource.data.expiryDate ==
+                request.time + duration.value(
+                  request.resource.data.durationDays,
+                  "d"
+                )
+        )
+
+        && keyAfter(request.resource.data.activationKeyId).data.membershipStartAt ==
+          request.resource.data.startDate
+        && keyAfter(request.resource.data.activationKeyId).data.membershipExpiryAt ==
+          request.resource.data.expiryDate;
+
+      allow update: if sameUser(uid)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.status == "ACTIVE"
+        && request.resource.data.source == "ACTIVATION_KEY"
+        && request.resource.data.activationKeyId is string
+        && request.resource.data.activationKeyId != resource.data.activationKeyId
+
+        && keyAfter(request.resource.data.activationKeyId).data.status == "REDEEMED"
+        && keyAfter(request.resource.data.activationKeyId).data.targetEmail == request.auth.token.email
+        && keyAfter(request.resource.data.activationKeyId).data.redeemedByUid == request.auth.uid
+        && keyAfter(request.resource.data.activationKeyId).data.redeemedEmail == request.auth.token.email
+
+        && request.resource.data.planId ==
+          keyAfter(request.resource.data.activationKeyId).data.planId
+        && request.resource.data.planName ==
+          keyAfter(request.resource.data.activationKeyId).data.planName
+        && request.resource.data.price ==
+          keyAfter(request.resource.data.activationKeyId).data.price
+        && request.resource.data.offerPrice ==
+          keyAfter(request.resource.data.activationKeyId).data.offerPrice
+        && request.resource.data.durationDays ==
+          keyAfter(request.resource.data.activationKeyId).data.durationDays
+        && request.resource.data.shippingEnabled ==
+          keyAfter(request.resource.data.activationKeyId).data.shippingEnabled
+        && request.resource.data.deviceLimit ==
+          keyAfter(request.resource.data.activationKeyId).data.deviceLimit
+
+        && request.resource.data.startDate ==
+          (
+            resource.data.expiryDate != null
+              && resource.data.expiryDate > request.time
+              ? resource.data.expiryDate
+              : request.time
+          )
+
+        && (
+          request.resource.data.durationDays == 0
+            ? request.resource.data.expiryDate == null
+            : request.resource.data.expiryDate ==
+                request.resource.data.startDate + duration.value(
+                  request.resource.data.durationDays,
+                  "d"
+                )
+        )
+
+        && keyAfter(request.resource.data.activationKeyId).data.membershipStartAt ==
+          request.resource.data.startDate
+        && keyAfter(request.resource.data.activationKeyId).data.membershipExpiryAt ==
+          request.resource.data.expiryDate;
     }
 
-    match /devices/{uid} {
-      allow read: if isAdmin() || (request.auth != null && request.auth.uid == uid);
+    match /devices/{uid}/sessions/{slot} {
+      allow read: if isAdmin() || sameUser(uid);
+
+      // Three fixed slots: 1, 2, 3.
+      // The membership's deviceLimit decides whether the selected slot is valid.
       allow create: if isAdmin() || (
-        request.auth != null && request.auth.uid == uid &&
-        request.resource.data.deviceId is string
+        activeMembership(uid)
+        && (slot == "1" || slot == "2" || slot == "3")
+        && slotAllowed(slot, membershipDoc(uid).data.deviceLimit)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.slot == slot
+        && request.resource.data.deviceId is string
+        && request.resource.data.deviceLabel is string
+        && request.resource.data.platform is string
+        && request.resource.data.browser is string
+        && request.resource.data.status == "ACTIVE"
       );
+
       allow update: if isAdmin() || (
-        request.auth != null && request.auth.uid == uid &&
-        request.resource.data.deviceId == resource.data.deviceId &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          "lastActiveAt", "status", "deviceLabel", "platform", "accessType", "deviceLimit"
+        activeMembership(uid)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.slot == resource.data.slot
+        && request.resource.data.deviceId == resource.data.deviceId
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "lastActiveAt",
+          "deviceLabel",
+          "platform",
+          "browser"
         ])
       );
+
+      // Reset is intentionally admin-only: deleting a session frees its slot.
       allow delete: if isAdmin();
     }
 
-    match /settings/{id} {
-      allow read: if isAdmin() || request.auth != null;
-      allow write: if isAdmin();
-    }
-
-    // Keep a final admin-only fallback for any legacy documents still present.
-    match /{document=**} {
-      allow read, write: if isAdmin();
-    }
+    // No wildcard allow. Unmatched documents are denied by default.
   }
 }
