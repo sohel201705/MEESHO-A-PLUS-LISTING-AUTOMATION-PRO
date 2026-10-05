@@ -2,7 +2,8 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function isAdmin() {
-      return request.auth != null && request.auth.uid == "1xoVNw3HMcdmO0n7dB0iDMDYj9r1";
+      return request.auth != null
+        && request.auth.uid == "1xoVNw3HMcdmO0n7dB0iDMDYj9r1";
     }
 
     match /admins/{uid} {
@@ -12,43 +13,100 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if isAdmin() || (request.auth != null && request.auth.uid == uid);
       allow create: if request.auth != null && request.auth.uid == uid;
-      allow update: if isAdmin() || (request.auth != null && request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["name","email","lastLoginAt"]));
+      allow update: if isAdmin() || (
+        request.auth != null && request.auth.uid == uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "name", "email", "displayName", "lastLoginAt", "updatedAt"
+        ])
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /plans/{id} {
+      allow read: if isAdmin() || request.auth != null;
+      allow write: if isAdmin();
+    }
+
+    match /activationKeys/{code} {
+      allow read: if isAdmin() || (
+        request.auth != null &&
+        resource.data.status == "AVAILABLE" &&
+        resource.data.targetEmail == request.auth.token.email
+      );
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        request.auth != null &&
+        resource.data.status == "AVAILABLE" &&
+        resource.data.targetEmail == request.auth.token.email &&
+        request.resource.data.status == "REDEEMED" &&
+        resource.data.keyExpiresAt > request.time &&
+        request.resource.data.redeemedByUid == request.auth.uid &&
+        request.resource.data.redeemedEmail == request.auth.token.email &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "status", "redeemedByUid", "redeemedEmail", "redeemedAt"
+        ])
+      );
+    }
+
+    match /memberships/{uid} {
+      allow read: if isAdmin() || (request.auth != null && request.auth.uid == uid);
+      allow create: if isAdmin() || (
+        request.auth != null && request.auth.uid == uid &&
+        request.resource.data.status == "ACTIVE" &&
+        request.resource.data.email == request.auth.token.email &&
+        request.resource.data.activationKeyId is string &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.status == "REDEEMED" &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.keyExpiresAt > request.time &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.redeemedByUid == request.auth.uid &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.planId == request.resource.data.planId &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.durationDays == request.resource.data.durationDays &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.shippingEnabled == request.resource.data.shippingEnabled &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.deviceLimit == request.resource.data.deviceLimit &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.membershipStartAt == request.resource.data.startDate &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.membershipExpiryAt == request.resource.data.expiryDate
+      );
+      allow update: if isAdmin() || (
+        request.auth != null && request.auth.uid == uid &&
+        resource.data.activationKeyId is string &&
+        request.resource.data.activationKeyId is string &&
+        resource.data.activationKeyId != request.resource.data.activationKeyId &&
+        request.resource.data.status == "ACTIVE" &&
+        request.resource.data.email == request.auth.token.email &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.status == "REDEEMED" &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.keyExpiresAt > request.time &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.redeemedByUid == request.auth.uid &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.planId == request.resource.data.planId &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.durationDays == request.resource.data.durationDays &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.shippingEnabled == request.resource.data.shippingEnabled &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.deviceLimit == request.resource.data.deviceLimit &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.membershipStartAt == request.resource.data.startDate &&
+        getAfter(/databases/$(database)/documents/activationKeys/$(request.resource.data.activationKeyId)).data.membershipExpiryAt == request.resource.data.expiryDate
+      );
       allow delete: if isAdmin();
     }
 
     match /devices/{uid} {
       allow read: if isAdmin() || (request.auth != null && request.auth.uid == uid);
-      allow create: if isAdmin() || (request.auth != null && request.auth.uid == uid && request.resource.data.uid == request.auth.uid && request.resource.data.deviceId is string);
-      allow update: if isAdmin() || (request.auth != null && request.auth.uid == uid && request.resource.data.deviceId == resource.data.deviceId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["lastActiveAt","status","deviceLabel","platform"]));
+      allow create: if isAdmin() || (
+        request.auth != null && request.auth.uid == uid &&
+        request.resource.data.deviceId is string
+      );
+      allow update: if isAdmin() || (
+        request.auth != null && request.auth.uid == uid &&
+        request.resource.data.deviceId == resource.data.deviceId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "lastActiveAt", "status", "deviceLabel", "platform", "accessType", "deviceLimit"
+        ])
+      );
       allow delete: if isAdmin();
     }
 
-    match /memberships/{uid} {
-      allow read: if isAdmin() || (request.auth != null && request.auth.uid == uid);
-      allow write: if isAdmin();
-    }
-
-    // Legacy collection retained for historical records only.
-    // Customer payment submission is disabled because all payments are handled in WhatsApp.
-    match /payments/{id} {
-      allow read, write: if isAdmin();
-    }
-
-    match /plans/{id} {
-      allow read: if request.auth != null;
-      allow write: if isAdmin();
-    }
-
-    match /promoCodes/{id} {
-      allow read: if request.auth != null;
-      allow write: if isAdmin();
-    }
-
     match /settings/{id} {
-      allow read: if request.auth != null;
+      allow read: if isAdmin() || request.auth != null;
       allow write: if isAdmin();
     }
 
+    // Keep a final admin-only fallback for any legacy documents still present.
     match /{document=**} {
       allow read, write: if isAdmin();
     }

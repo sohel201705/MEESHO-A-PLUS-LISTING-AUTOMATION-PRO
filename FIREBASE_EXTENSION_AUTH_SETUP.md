@@ -1,26 +1,21 @@
-# Firebase Extension Auth Bridge
+# MEESHO A+ LISTING AUTOMATION PRO — v2.1.0
 
-This GitHub Pages package now includes `extension-auth.html` and `extension-auth.js`.
-The Chrome extension loads this page inside its MV3 offscreen document to complete Google sign-in with Firebase.
-
-## Firebase Console
-1. Authentication → Sign-in method → Google must be enabled.
-2. Authentication → Settings → Authorized domains must include `sohel201705.github.io`.
-3. After loading the unpacked extension, copy its Extension ID from `chrome://extensions` and add the extension URI/domain required by Firebase's Chrome-extension authentication guide.
-4. Firestore Rules must be updated with the secure rules supplied inside the extension package.
-
-## Payment approval
-The updated Admin Panel approval flow now creates/updates `memberships/{uid}` using the selected plan's duration, then marks the payment approved and updates the user record.
-
-
-## WhatsApp-only payment flow
-Customers no longer submit UPI/QR/UTR/receipt inside the extension. A plan button opens WhatsApp directly. After payment is verified in WhatsApp, use Admin Panel → Memberships → Activate Membership to choose the customer and plan. Plans can be Monthly, Yearly, Lifetime / Unlimited, or any custom duration created under Plans.
-
-
-### Final manual sales flow
+## Final flow
 1. Customer signs in with Google.
-2. Customer sees active paid plans from Firestore only.
-3. Customer clicks Buy via WhatsApp; WhatsApp opens directly with the selected plan and price.
-4. Customer receives payment details in WhatsApp, pays, and sends screenshot/UTR in WhatsApp.
-5. Admin opens Memberships → Approve & Activate Membership, selects the customer and the plan, optionally keeps Renewal checked, and activates access.
-6. Monthly = 30 days, Yearly = 365 days, Lifetime / Unlimited = 0 days by default; all are editable from Plans.
+2. If no active membership exists, the pricing screen appears.
+3. Customer chooses a plan and is sent to WhatsApp for payment.
+4. Admin verifies payment in WhatsApp.
+5. Admin Panel → Activation Keys → search existing Gmail or enter a new Gmail → choose plan → Generate Activation Key.
+6. Admin copies/sends the code by WhatsApp.
+7. Customer enters the one-time code in the extension while signed into the same Gmail.
+8. The code is redeemed atomically and creates/updates one membership.
+9. Autofill and Shipping Optimizer use the same membership state and expiry.
+10. Device binding is checked after membership validation.
+
+## Important
+- Do not use old Payment/Promo pages for this final flow.
+- Do not leave old extension versions loaded in Chrome.
+- Publish the included firestore.rules before testing activation-key redemption.
+- Plan prices are controlled only from Admin Panel → Plans. A zero price displays as Contact Admin rather than disappearing.
+- Lifetime is durationDays=0 and expiryDate=null.
+- Activation keys are intended to be generated after payment so the membership period starts immediately when the key is issued/redeemed.
