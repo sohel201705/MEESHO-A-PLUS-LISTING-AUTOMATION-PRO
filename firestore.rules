@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAdmin() {
+      return request.auth != null && request.auth.uid == "1xoVNw3HMcdmO0n7dB0iDMDYj9r1";
+    }
+
+    match /admins/{uid} {
+      allow read, write: if isAdmin();
+    }
+
+    match /users/{uid} {
+      allow read: if isAdmin() || (request.auth != null && request.auth.uid == uid);
+      allow create: if request.auth != null && request.auth.uid == uid;
+      allow update: if isAdmin() || (request.auth != null && request.auth.uid == uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["name","email","lastLoginAt"]));
+      allow delete: if isAdmin();
+    }
+
+    match /devices/{uid} {
+      allow read: if isAdmin() || (request.auth != null && request.auth.uid == uid);
+      allow create: if isAdmin() || (request.auth != null && request.auth.uid == uid && request.resource.data.uid == request.auth.uid && request.resource.data.deviceId is string);
+      allow update: if isAdmin() || (request.auth != null && request.auth.uid == uid && request.resource.data.deviceId == resource.data.deviceId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["lastActiveAt","status","deviceLabel","platform"]));
+      allow delete: if isAdmin();
+    }
+
+    match /memberships/{uid} {
+      allow read: if isAdmin() || (request.auth != null && request.auth.uid == uid);
+      allow write: if isAdmin();
+    }
+
+    function expectedPlanPrice(planId) {
+      let p = get(/databases/$(database)/documents/plans/$(planId)).data;
+      return p.offerPrice > 0 ? p.offerPrice : p.regularPrice;
+    }
+
+    match /payments/{id} {
+      allow read: if isAdmin() || (request.auth != null && resource.data.uid == request.auth.uid);
+      allow create: if request.auth != null
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.status == "PENDING"
+                    && request.resource.data.paymentMethod == "UPI"
+                    && request.resource.data.utr is string
+                    && request.resource.data.receiptDataUrl is string
+                    && request.resource.data.receiptDataUrl.size() <= 900000
+                    && exists(/databases/$(database)/documents/plans/$(request.resource.data.planId))
+                    && request.resource.data.amount == expectedPlanPrice(request.resource.data.planId)
+                    && request.resource.data.amount > 0;
+      allow update, delete: if isAdmin();
+    }
+
+    match /plans/{id} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
+
+    match /promoCodes/{id} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
+
+    match /settings/{id} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
