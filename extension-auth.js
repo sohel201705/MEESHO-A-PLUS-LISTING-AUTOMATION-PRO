@@ -5,25 +5,41 @@ import { firebaseConfig } from "./firebase-config.js";
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
-const PARENT_FRAME = document.location.ancestorOrigins[0] || "*";
+provider.setCustomParameters({ prompt: "select_account" });
+const statusEl = document.getElementById("status");
 
-function send(payload){
-  try { globalThis.parent.self.postMessage(payload, PARENT_FRAME); }
-  catch (_) { globalThis.parent.self.postMessage(payload, "*"); }
+function parentOrigin() {
+  const a = document.location.ancestorOrigins;
+  const origin = a && a.length ? a[a.length - 1] : "";
+  return origin.startsWith("chrome-extension://") ? origin : "";
 }
 
-window.addEventListener("message", async (event) => {
-  if (event.data?.type !== "FIREBASE_AUTH_START") return;
+function send(payload) {
+  const origin = parentOrigin();
+  if (!origin || window.parent === window) return;
+  window.parent.postMessage(payload, origin);
+}
+
+async function login() {
+  statusEl.textContent = "Opening Google sign-in…";
   try {
-    const result = await signInWithPopup(auth, provider);
-    const user = result.user;
+    const credential = await signInWithPopup(auth, provider);
+    const user = credential.user;
     const idToken = await user.getIdToken(true);
-    send({type:"FIREBASE_AUTH_RESULT", result:{
-      idToken,
-      expiresIn: 3600,
+    send({ type:"FIREBASE_AUTH_RESULT", result:{
+      idToken, expiresIn:3600,
       user:{uid:user.uid,email:user.email||"",displayName:user.displayName||"",photoURL:user.photoURL||""}
     }});
+    statusEl.textContent = "Signed in successfully.";
   } catch (error) {
-    send({type:"FIREBASE_AUTH_RESULT", error:error?.message||"Google sign-in failed."});
+    console.error(error);
+    send({type:"FIREBASE_AUTH_RESULT",error:error?.message||error?.code||"Google sign-in failed."});
+    statusEl.textContent = error?.message || "Google sign-in failed.";
   }
+}
+
+window.addEventListener("message", event => {
+  const origin = parentOrigin();
+  if (!origin || event.origin !== origin || event.source !== window.parent) return;
+  if (event.data?.type === "FIREBASE_AUTH_START") login();
 });

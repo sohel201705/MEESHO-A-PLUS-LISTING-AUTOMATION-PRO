@@ -1,6 +1,5 @@
 // Firebase Web SDK config for MEESHO A+ LISTING AUTOMATION PRO.
-// This config is safe to expose in a browser app; Firestore/Storage Rules
-// are the real access control layer. NEVER put a service-account private key here.
+// Public client configuration only. Never place service-account credentials here.
 export const firebaseConfig = {
   apiKey: "AIzaSyAGmhXJkhVjV_BGcNP8plBDvsWXj8yLezo",
   authDomain: "meesho-a-plus-listing.firebaseapp.com",
