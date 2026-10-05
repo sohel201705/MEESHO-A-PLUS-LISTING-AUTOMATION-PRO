@@ -28,24 +28,10 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    function expectedPlanPrice(planId) {
-      let p = get(/databases/$(database)/documents/plans/$(planId)).data;
-      return p.offerPrice > 0 ? p.offerPrice : p.regularPrice;
-    }
-
+    // Legacy collection retained for historical records only.
+    // Customer payment submission is disabled because all payments are handled in WhatsApp.
     match /payments/{id} {
-      allow read: if isAdmin() || (request.auth != null && resource.data.uid == request.auth.uid);
-      allow create: if request.auth != null
-                    && request.resource.data.uid == request.auth.uid
-                    && request.resource.data.status == "PENDING"
-                    && request.resource.data.paymentMethod == "UPI"
-                    && request.resource.data.utr is string
-                    && request.resource.data.receiptDataUrl is string
-                    && request.resource.data.receiptDataUrl.size() <= 900000
-                    && exists(/databases/$(database)/documents/plans/$(request.resource.data.planId))
-                    && request.resource.data.amount == expectedPlanPrice(request.resource.data.planId)
-                    && request.resource.data.amount > 0;
-      allow update, delete: if isAdmin();
+      allow read, write: if isAdmin();
     }
 
     match /plans/{id} {

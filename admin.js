@@ -90,9 +90,18 @@ function computedMembershipStatus(d) {
   const raw = String(d?.status || '').toUpperCase();
   if (raw === 'SUSPENDED' || raw === 'REVOKED') return raw;
   const expiry = toJsDate(d?.expiryDate);
+  const duration = Number(d?.durationDays ?? -1);
   if (expiry && expiry.getTime() < Date.now()) return 'EXPIRED';
-  if (raw === 'ACTIVE' || !raw) return 'ACTIVE';
+  if (duration === 0 || raw === 'ACTIVE') return 'ACTIVE';
+  if (!raw) return 'INACTIVE';
   return raw;
+}
+
+function daysRemaining(d) {
+  if (Number(d?.durationDays ?? -1) === 0 || !d?.expiryDate) return null;
+  const expiry = toJsDate(d.expiryDate);
+  if (!expiry) return null;
+  return Math.max(0, Math.ceil((expiry.getTime() - Date.now()) / 86400000));
 }
 
 function statusBadge(status) {
@@ -136,7 +145,7 @@ async function loadDashboard() {
 
   memberships.forEach(s => {
     const d = s.data();
-    const status = String(d.status || "").toUpperCase();
+    const status = computedMembershipStatus(d);
     if (status === "ACTIVE") active++;
     if (status === "EXPIRED") expired++;
     if (String(d.planId || "").toLowerCase() === "lifetime" || Number(d.durationDays || 0) === 0) lifetime++;
@@ -182,22 +191,30 @@ async function loadDashboard() {
 }
 
 async function loadUsers() {
-  const snap = await getDocs(query(collection(db, "users"), limit(500)));
+  const [snap, membershipSnap] = await Promise.all([
+    getDocs(query(collection(db, "users"), limit(500))),
+    getDocs(query(collection(db, "memberships"), limit(500)))
+  ]);
+  const membershipMap = new Map();
+  membershipSnap.forEach(s => membershipMap.set(s.id, { id:s.id, ...s.data() }));
   let rows = "";
 
   snap.forEach(s => {
     const d = s.data();
+    const m = membershipMap.get(s.id) || null;
+    const status = m ? computedMembershipStatus(m) : "INACTIVE";
+    const planName = m?.planName || m?.planId || d.planName || d.planId || "—";
     rows += `
       <tr>
-        <td>${esc(d.name || d.displayName || "-")}</td>
+        <td><strong>${esc(d.name || d.displayName || "-")}</strong><div class="muted tiny">${esc(s.id)}</div></td>
         <td>${esc(d.email || "-")}</td>
-        <td>${esc(d.planId || "-")}</td>
-        <td>${statusBadge(d.status || d.membershipStatus || "-")}</td>
+        <td>${esc(planName)}</td>
+        <td>${statusBadge(status)}</td>
         <td>${esc(dateTimeText(d.lastLoginAt))}</td>
         <td class="row-actions">
-          <button data-user="${s.id}" class="activate-user">Activate</button>
-          <button data-user="${s.id}" class="extend">Extend</button>
-          <button data-user="${s.id}" class="suspend">Suspend</button>
+          <button data-user="${esc(s.id)}" class="activate-user">Activate</button>
+          <button data-user="${esc(s.id)}" class="extend">Extend</button>
+          <button data-user="${esc(s.id)}" class="suspend">Suspend</button>
         </td>
       </tr>
     `;
@@ -207,7 +224,7 @@ async function loadUsers() {
     <div class="page-head">
       <div>
         <h2>Users</h2>
-        <p class="muted">Customer accounts and membership status</p>
+        <p class="muted">Customer accounts, live membership status and activation controls</p>
       </div>
       <button id="usersRefresh" class="ghost">Refresh</button>
     </div>
@@ -241,7 +258,7 @@ async function loadUsers() {
   document.querySelectorAll(".suspend").forEach(btn => {
     btn.onclick = async () => {
       const uid = btn.dataset.user;
-      if (!confirm("Suspend this user?")) return;
+      if (!confirm("Suspend this user and their membership?")) return;
       await updateDoc(doc(db, "users", uid), {
         status: "SUSPENDED",
         membershipStatus: "SUSPENDED",
@@ -252,8 +269,7 @@ async function loadUsers() {
         await updateDoc(doc(db, "memberships", uid), { status: "SUSPENDED", updatedAt: serverTimestamp() });
       }
       toast("User suspended.");
-      await loadUsers();
-      await loadMemberships();
+      await Promise.all([loadUsers(), loadMemberships(), loadDashboard()]);
     };
   });
 
@@ -263,40 +279,33 @@ async function loadUsers() {
       const days = prompt("How many days should be added?", "30");
       const n = Number(days);
       if (!Number.isFinite(n) || n <= 0) return;
-
-      const ref = doc(db, "users", uid);
-      const userSnap = await getDoc(ref);
-      if (!userSnap.exists()) return;
-
-      const d = userSnap.data();
-      let expiry = d.membershipExpiry?.toDate
-        ? d.membershipExpiry.toDate()
-        : d.membershipExpiry
-        ? new Date(d.membershipExpiry)
-        : new Date();
-
-      if (Number.isNaN(expiry.getTime()) || expiry < new Date()) expiry = new Date();
+      const membershipRef = doc(db, "memberships", uid);
+      const ms = await getDoc(membershipRef);
+      if (!ms.exists()) {
+        toast("No membership found. Use Activate first.", "error");
+        return;
+      }
+      const m = ms.data();
+      if (Number(m.durationDays ?? -1) === 0 || !m.expiryDate) {
+        toast("Lifetime / Unlimited membership does not need extension.", "error");
+        return;
+      }
+      let expiry = toJsDate(m.expiryDate) || new Date();
+      if (expiry < new Date()) expiry = new Date();
       expiry.setDate(expiry.getDate() + n);
-
-      await updateDoc(ref, {
+      await updateDoc(membershipRef, {
+        expiryDate: Timestamp.fromDate(expiry),
+        status: "ACTIVE",
+        updatedAt: serverTimestamp()
+      });
+      await updateDoc(doc(db, "users", uid), {
         membershipExpiry: Timestamp.fromDate(expiry),
         membershipStatus: "ACTIVE",
         status: "ACTIVE",
         updatedAt: serverTimestamp()
       });
-      const membershipRef = doc(db, "memberships", uid);
-      const membershipSnap = await getDoc(membershipRef);
-      if (membershipSnap.exists()) {
-        await updateDoc(membershipRef, {
-          expiryDate: Timestamp.fromDate(expiry),
-          status: "ACTIVE",
-          updatedAt: serverTimestamp()
-        });
-      }
-
       toast(`Membership extended by ${n} days.`);
-      await loadUsers();
-      await loadMemberships();
+      await Promise.all([loadUsers(), loadMemberships(), loadDashboard()]);
     };
   });
 }
@@ -1042,9 +1051,11 @@ async function loadMemberships() {
     const expiry = toJsDate(d.expiryDate);
     const expiryLabel = expiry ? dateText(d.expiryDate) : "Lifetime / Unlimited";
     const status = computedMembershipStatus(d);
-    rows += `<tr><td><strong>${esc(user.email || user.name || "Unknown user")}</strong><div class="muted tiny">${esc(uid)}</div></td><td>${esc(d.planName || d.planId || "-")}</td><td>${statusBadge(status)}</td><td>${esc(dateText(d.startDate))}</td><td>${esc(expiryLabel)}</td><td class="row-actions"><button class="ghost extend-membership" data-uid="${esc(uid)}">Extend</button><button class="ghost suspend-membership" data-uid="${esc(uid)}">Suspend</button></td></tr>`;
+    const remain = daysRemaining(d);
+    const remainLabel = remain === null ? "Unlimited" : `${remain} day${remain === 1 ? "" : "s"} left`;
+    rows += `<tr><td><strong>${esc(user.email || user.name || "Unknown user")}</strong><div class="muted tiny">${esc(uid)}</div></td><td>${esc(d.planName || d.planId || "-")}</td><td>${statusBadge(status)}<div class="muted tiny">${esc(remainLabel)}</div></td><td title="${esc(dateTimeText(d.startDate))}">${esc(dateText(d.startDate))}</td><td title="${esc(dateTimeText(d.expiryDate))}">${esc(expiryLabel)}</td><td class="row-actions"><button class="ghost extend-membership" data-uid="${esc(uid)}">Extend</button><button class="ghost suspend-membership" data-uid="${esc(uid)}">Suspend</button></td></tr>`;
   });
-  $("memberships").innerHTML=`<div class="page-head"><div><h2>Memberships</h2><p class="muted">Activate verified WhatsApp payments, manage monthly/yearly/lifetime access, extend and suspend memberships.</p></div><div class="head-actions"><button id="activateMembershipBtn" class="primary compact-btn">+ Activate Membership</button><button id="membershipRefresh" class="ghost">Refresh</button></div></div><div class="panel" style="margin-top:0;"><div class="notice"><b>Important:</b> Activate the membership for the same Google account shown in the customer's extension. The UID is the account identity; email is displayed here to help you select the correct customer.</div></div><div id="membershipEditor"></div><div class="panel"><table class="table"><thead><tr><th>Customer</th><th>Plan</th><th>Status</th><th>Start</th><th>Expiry</th><th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="6">No memberships yet.</td></tr>'}</tbody></table></div>`;
+  $("memberships").innerHTML=`<div class="page-head"><div><h2>Memberships</h2><p class="muted">Activate verified WhatsApp payments, manage Monthly / Yearly / Lifetime / Unlimited access, extend and suspend memberships. Dates are shown in a compact Indian format.</p></div><div class="head-actions"><button id="activateMembershipBtn" class="primary compact-btn">+ Activate Membership</button><button id="membershipRefresh" class="ghost">Refresh</button></div></div><div class="panel" style="margin-top:0;"><div class="notice"><b>Important:</b> Activate the membership for the same Google account shown in the customer's extension. The UID is the account identity; email is displayed here to help you select the correct customer.</div></div><div id="membershipEditor"></div><div class="panel"><table class="table"><thead><tr><th>Customer</th><th>Plan</th><th>Status</th><th>Start</th><th>Expiry</th><th>Actions</th></tr></thead><tbody>${rows || '<tr><td colspan="6">No memberships yet.</td></tr>'}</tbody></table></div>`;
   $("membershipRefresh").onclick=loadMemberships;
   $("activateMembershipBtn").onclick=()=>openActivateMembershipForm();
   document.querySelectorAll('.extend-membership').forEach(btn=>{btn.onclick=async()=>{const days=prompt('Add how many days?','30');const n=Number(days);if(!Number.isFinite(n)||n<=0)return;try{const ref=doc(db,'memberships',btn.dataset.uid);const s=await getDoc(ref);if(!s.exists())throw new Error('Membership not found.');const d=s.data();if(!d.expiryDate){toast('Lifetime membership does not need extension.');return;}const current=d.expiryDate.toDate();const expiry=new Date(Math.max(current.getTime(),Date.now()));expiry.setDate(expiry.getDate()+n);await updateDoc(ref,{expiryDate:Timestamp.fromDate(expiry),status:'ACTIVE',updatedAt:serverTimestamp()});await updateDoc(doc(db,'users',btn.dataset.uid),{status:'ACTIVE',membershipStatus:'ACTIVE',membershipExpiry:Timestamp.fromDate(expiry),updatedAt:serverTimestamp()});toast(`Membership extended by ${n} days.`);await loadMemberships();await loadUsers();}catch(e){toast(e.message||'Could not extend.','error');}};});
