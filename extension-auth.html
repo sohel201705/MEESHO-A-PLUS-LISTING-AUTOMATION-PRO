@@ -3,10 +3,42 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>MEESHO A+ LISTING AUTOMATION PRO — Google Sign In</title>
+  <title>MEESHO A+ LISTING AUTOMATION PRO — Google Login</title>
+  <style>
+    *{box-sizing:border-box}
+    body{
+      margin:0;min-height:100vh;display:grid;place-items:center;
+      background:#07111f;color:#fff;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif
+    }
+    .card{
+      width:min(460px,calc(100% - 32px));padding:30px;border:1px solid #203453;
+      border-radius:18px;background:#0c1728;box-shadow:0 20px 60px rgba(0,0,0,.35)
+    }
+    .brand{font-weight:950;font-size:22px}.brand span{display:block;color:#42a5ff;font-size:13px;letter-spacing:1.3px;margin-top:4px}
+    .sub{font-size:11px;font-weight:800;letter-spacing:1px;color:#9fb0c7;margin-top:5px}
+    h1{margin:28px 0 8px;font-size:24px}.muted{color:#a9b8ca;line-height:1.55}
+    button{
+      width:100%;padding:14px 16px;border:0;border-radius:12px;background:#2563eb;color:#fff;
+      font-weight:900;font-size:15px;cursor:pointer;margin-top:18px
+    }
+    button:hover{background:#1d4ed8}.error{color:#ff7d7d;font-size:13px;margin-top:14px;min-height:18px}
+    .success{color:#6ee7a0;font-size:13px;margin-top:14px;min-height:18px}
+    .hint{font-size:12px;color:#8495aa;margin-top:14px}
+  </style>
 </head>
 <body>
-  <div id="status">Preparing Google sign-in…</div>
+  <main class="card">
+    <div class="brand">MEESHO A+<span>LISTING AUTOMATION PRO</span></div>
+    <div class="sub">BY SOHEL ENTERPRISE</div>
+
+    <h1>Google Login</h1>
+    <p class="muted">Continue with the Google account you use for MEESHO A+ LISTING AUTOMATION PRO.</p>
+
+    <button id="googleLoginBtn">Continue with Google</button>
+    <div id="message"></div>
+    <div class="hint">After successful login this page will close automatically.</div>
+  </main>
+
   <script type="module" src="./extension-auth.js"></script>
 </body>
 </html>
