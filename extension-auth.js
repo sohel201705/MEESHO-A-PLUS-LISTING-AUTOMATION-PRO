@@ -46,7 +46,7 @@ async function login() {
 
   button.disabled = true;
   button.textContent = "Opening Google…";
-  setMessage("Opening Google account selection…", "success");
+  setMessage("Choose the Google account that will become the Master Gmail for this membership…", "success");
 
   try {
     const credential = await signInWithPopup(auth, provider);

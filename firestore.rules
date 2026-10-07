@@ -41,17 +41,22 @@ service cloud.firestore {
       return slot == "1" || slot == "2" || slot == "3";
     }
 
+    function keyAfter(code) {
+      return getAfter(/databases/$(database)/documents/activationKeys/$(code));
+    }
+
+    // Admin collection is intentionally preserved by every product reset.
     match /admins/{uid} {
       allow get: if signedIn() && uid == request.auth.uid;
       allow list, create, update, delete: if isAdmin();
     }
 
-    // The Google account used at the moment of first successful activation
-    // becomes the permanent master account for that membership.
+    // One document per permanent Master Gmail.
     match /customers/{emailId} {
       allow get: if isAdmin() || sameEmail(emailId);
       allow list: if isAdmin();
 
+      // First successful activation creates the Master Gmail membership.
       allow create: if isAdmin() || (
         sameEmail(emailId)
         && request.resource.data.email == request.auth.token.email
@@ -78,6 +83,8 @@ service cloud.firestore {
         )
       );
 
+      // Admin can edit/suspend/revoke/delete. Master Gmail can update only
+      // harmless profile metadata or redeem another key for renewal.
       allow update: if isAdmin()
         || (
           sameEmail(emailId)
@@ -162,21 +169,21 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    function keyAfter(code) {
-      return getAfter(/databases/$(database)/documents/activationKeys/$(code));
-    }
-
     match /activationKeys/{code} {
       allow list: if isAdmin();
+
+      // A signed-in user can validate a specific key only when it is still
+      // available and not expired.
       allow get: if isAdmin() || (
         signedIn()
         && resource.data.status == "AVAILABLE"
         && resource.data.keyExpiresAt > request.time
       );
+
       allow create, delete: if isAdmin();
 
-      // A key is not tied to any Gmail when created. It becomes bound to the
-      // currently authenticated Google account only when redeemed.
+      // The key is NOT tied to a Gmail at creation time. The first successful
+      // atomic redemption binds it to the current Firebase Google account.
       allow update: if isAdmin() || (
         signedIn()
         && resource.data.status == "AVAILABLE"
@@ -200,7 +207,61 @@ service cloud.firestore {
       );
     }
 
-    // No payments, promoCodes, users, memberships, or top-level devices.
-    // Any unmatched/legacy document is denied by default.
+
+
+    // Admin-only cleanup access for legacy collections. These collections are
+    // not part of the clean runtime architecture, but must remain deletable
+    // from Factory Reset if old data is still present.
+    match /users/{id} {
+      allow read, delete: if isAdmin();
+    }
+
+    match /memberships/{id} {
+      allow read, delete: if isAdmin();
+    }
+
+    match /devices/{id} {
+      allow read, delete: if isAdmin();
+    }
+
+    match /devices/{id}/sessions/{sessionId} {
+      allow read, delete: if isAdmin();
+    }
+
+    match /payments/{id} {
+      allow read, delete: if isAdmin();
+    }
+
+    match /promoCodes/{id} {
+      allow read, delete: if isAdmin();
+    }
+
+    match /schema/{id} {
+      allow read, delete: if isAdmin();
+    }
+
+    match /subscriptions/{id} {
+      allow read, delete: if isAdmin();
+    }
+
+    match /licenses/{id} {
+      allow read, delete: if isAdmin();
+    }
+
+    match /sessions/{id} {
+      allow read, delete: if isAdmin();
+    }
+
+    match /profiles/{id} {
+      allow read, delete: if isAdmin();
+    }
+
+    match /orders/{id} {
+      allow read, delete: if isAdmin();
+    }
+
+    // No users, memberships, payments, promoCodes, subscriptions, licenses,
+    // top-level devices, sessions, profiles, or orders are used by the clean
+    // membership system. Unmatched legacy data is denied by default.
   }
 }
