@@ -1,7 +1,3 @@
-// V7.2 CLIENT CONTRACT: customer activation is self-service after exact Gmail + valid key verification.
-// The extension uses CREATE for a first-time customers/{email} document and UPDATE for an existing one.
-// No admin approval or admin UID is required for customer activation.
-
 rules_version = '2';
 
 service cloud.firestore {
@@ -11,7 +7,7 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-        function isAdmin() {
+    function isAdmin() {
       return signedIn()
         && (
           request.auth.uid == "m7pkPGN62YMWfPr7ftbSMw3jv052"
@@ -29,14 +25,6 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/customers/$(emailId));
     }
 
-    function customerAfter(emailId) {
-      return getAfter(/databases/$(database)/documents/customers/$(emailId));
-    }
-
-    function keyAfter(code) {
-      return getAfter(/databases/$(database)/documents/activationKeys/$(code));
-    }
-
     function activeCustomer(emailId) {
       let c = customerDoc(emailId);
       return sameEmail(emailId)
@@ -49,27 +37,8 @@ service cloud.firestore {
         );
     }
 
-    function slotAllowed(slot, deviceLimit) {
-      return (slot == "1" && deviceLimit >= 1)
-        || (slot == "2" && deviceLimit >= 2)
-        || (slot == "3" && deviceLimit >= 3)
-        || (slot == "4" && deviceLimit >= 4)
-        || (slot == "5" && deviceLimit >= 5)
-        || (slot == "6" && deviceLimit >= 6)
-        || (slot == "7" && deviceLimit >= 7)
-        || (slot == "8" && deviceLimit >= 8)
-        || (slot == "9" && deviceLimit >= 9)
-        || (slot == "10" && deviceLimit >= 10)
-        || (slot == "11" && deviceLimit >= 11)
-        || (slot == "12" && deviceLimit >= 12)
-        || (slot == "13" && deviceLimit >= 13)
-        || (slot == "14" && deviceLimit >= 14)
-        || (slot == "15" && deviceLimit >= 15)
-        || (slot == "16" && deviceLimit >= 16)
-        || (slot == "17" && deviceLimit >= 17)
-        || (slot == "18" && deviceLimit >= 18)
-        || (slot == "19" && deviceLimit >= 19)
-        || (slot == "20" && deviceLimit >= 20);
+    function slotAllowed(slot) {
+      return slot == "1" || slot == "2" || slot == "3";
     }
 
     match /admins/{uid} {
@@ -77,32 +46,13 @@ service cloud.firestore {
       allow list, create, update, delete: if isAdmin();
     }
 
-    // EMAIL IS THE CUSTOMER ACCOUNT KEY. Firebase UID is metadata/device identity only; membership is never selected by UID.
+    // The Google account used at the moment of first successful activation
+    // becomes the permanent master account for that membership.
     match /customers/{emailId} {
       allow get: if isAdmin() || sameEmail(emailId);
       allow list: if isAdmin();
 
-      // First login creates a clean, non-membership customer profile.
       allow create: if isAdmin() || (
-        sameEmail(emailId)
-        && request.resource.data.email == request.auth.token.email
-        && request.resource.data.status == "NOT_ACTIVATED"
-        && request.resource.data.deviceLimit >= 1
-        && request.resource.data.deviceLimit <= 20
-        && request.resource.data.diff({}).affectedKeys().hasOnly([
-          "email",
-          "name",
-          "displayName",
-          "uid",
-          "status",
-          "deviceLimit",
-          "createdAt",
-          "lastLoginAt",
-          "updatedAt"
-        ])
-      ) || (
-        // Activation/renewal is valid only when the same atomic write redeems
-        // a key issued to this exact email.
         sameEmail(emailId)
         && request.resource.data.email == request.auth.token.email
         && request.resource.data.status == "ACTIVE"
@@ -110,7 +60,6 @@ service cloud.firestore {
         && request.resource.data.activationKeyId is string
         && request.resource.data.activationKeyId != ""
         && keyAfter(request.resource.data.activationKeyId).data.status == "REDEEMED"
-        && keyAfter(request.resource.data.activationKeyId).data.targetEmail == request.auth.token.email
         && keyAfter(request.resource.data.activationKeyId).data.redeemedEmail == request.auth.token.email
         && keyAfter(request.resource.data.activationKeyId).data.redeemedByUid == request.auth.uid
         && request.resource.data.planId == keyAfter(request.resource.data.activationKeyId).data.planId
@@ -118,7 +67,8 @@ service cloud.firestore {
         && request.resource.data.price == keyAfter(request.resource.data.activationKeyId).data.price
         && request.resource.data.offerPrice == keyAfter(request.resource.data.activationKeyId).data.offerPrice
         && request.resource.data.durationDays == keyAfter(request.resource.data.activationKeyId).data.durationDays
-        && request.resource.data.deviceLimit == keyAfter(request.resource.data.activationKeyId).data.deviceLimit
+        && request.resource.data.deviceLimit == 3
+        && request.resource.data.shippingEnabled == keyAfter(request.resource.data.activationKeyId).data.shippingEnabled
         && request.resource.data.startDate <= request.time
         && request.resource.data.startDate >= request.time - duration.value(10, "m")
         && (
@@ -130,15 +80,10 @@ service cloud.firestore {
 
       allow update: if isAdmin()
         || (
-          // Profile/session updates are email-owned. UID may change on another device.
           sameEmail(emailId)
           && request.resource.data.email == resource.data.email
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            "name",
-            "displayName",
-            "uid",
-            "lastLoginAt",
-            "updatedAt"
+            "name", "displayName", "uid", "lastLoginAt", "updatedAt"
           ])
         )
         || (
@@ -147,13 +92,8 @@ service cloud.firestore {
           && request.resource.data.status == "ACTIVE"
           && request.resource.data.source == "ACTIVATION_KEY"
           && request.resource.data.activationKeyId is string
-          && (
-            resource.data.status != "ACTIVE"
-            || !(resource.data.activationKeyId is string)
-            || request.resource.data.activationKeyId != resource.data.activationKeyId
-          )
+          && request.resource.data.activationKeyId != resource.data.activationKeyId
           && keyAfter(request.resource.data.activationKeyId).data.status == "REDEEMED"
-          && keyAfter(request.resource.data.activationKeyId).data.targetEmail == request.auth.token.email
           && keyAfter(request.resource.data.activationKeyId).data.redeemedEmail == request.auth.token.email
           && keyAfter(request.resource.data.activationKeyId).data.redeemedByUid == request.auth.uid
           && request.resource.data.planId == keyAfter(request.resource.data.activationKeyId).data.planId
@@ -161,7 +101,13 @@ service cloud.firestore {
           && request.resource.data.price == keyAfter(request.resource.data.activationKeyId).data.price
           && request.resource.data.offerPrice == keyAfter(request.resource.data.activationKeyId).data.offerPrice
           && request.resource.data.durationDays == keyAfter(request.resource.data.activationKeyId).data.durationDays
-          && request.resource.data.deviceLimit == keyAfter(request.resource.data.activationKeyId).data.deviceLimit
+          && request.resource.data.deviceLimit == 3
+          && request.resource.data.shippingEnabled == keyAfter(request.resource.data.activationKeyId).data.shippingEnabled
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "planId", "planName", "price", "offerPrice", "durationDays", "status",
+            "shippingEnabled", "deviceLimit", "startDate", "expiryDate",
+            "activationKeyId", "source", "activatedAt", "updatedAt"
+          ])
           && request.resource.data.startDate == (
             resource.data.expiryDate != null && resource.data.expiryDate > request.time
               ? resource.data.expiryDate
@@ -182,7 +128,8 @@ service cloud.firestore {
 
       allow create: if isAdmin() || (
         activeCustomer(emailId)
-        && slotAllowed(slot, customerDoc(emailId).data.deviceLimit)
+        && slotAllowed(slot)
+        && customerDoc(emailId).data.deviceLimit == 3
         && request.resource.data.email == emailId
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.slot == slot
@@ -198,11 +145,7 @@ service cloud.firestore {
         && request.resource.data.deviceId == resource.data.deviceId
         && request.resource.data.status == resource.data.status
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          "deviceLabel",
-          "platform",
-          "browser",
-          "lastActiveAt",
-          "updatedAt"
+          "deviceLabel", "platform", "browser", "lastActiveAt", "updatedAt"
         ])
       );
 
@@ -219,42 +162,40 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    function keyAfter(code) {
+      return getAfter(/databases/$(database)/documents/activationKeys/$(code));
+    }
+
     match /activationKeys/{code} {
       allow list: if isAdmin();
       allow get: if isAdmin() || (
         signedIn()
         && resource.data.status == "AVAILABLE"
-        && resource.data.targetEmail == request.auth.token.email
         && resource.data.keyExpiresAt > request.time
       );
       allow create, delete: if isAdmin();
 
-      // The customer can redeem only the key issued to their email, and only
-      // inside the same atomic batch that creates/updates their customer record.
+      // A key is not tied to any Gmail when created. It becomes bound to the
+      // currently authenticated Google account only when redeemed.
       allow update: if isAdmin() || (
         signedIn()
         && resource.data.status == "AVAILABLE"
-        && resource.data.targetEmail == request.auth.token.email
         && resource.data.keyExpiresAt > request.time
         && request.resource.data.status == "REDEEMED"
         && request.resource.data.code == resource.data.code
-        && request.resource.data.targetEmail == resource.data.targetEmail
         && request.resource.data.planId == resource.data.planId
         && request.resource.data.planName == resource.data.planName
         && request.resource.data.price == resource.data.price
         && request.resource.data.offerPrice == resource.data.offerPrice
         && request.resource.data.durationDays == resource.data.durationDays
         && request.resource.data.shippingEnabled == resource.data.shippingEnabled
-        && request.resource.data.deviceLimit == resource.data.deviceLimit
+        && request.resource.data.deviceLimit == 3
         && request.resource.data.keyExpiresAt == resource.data.keyExpiresAt
         && request.resource.data.redeemedByUid == request.auth.uid
         && request.resource.data.redeemedEmail == request.auth.token.email
         && request.resource.data.redeemedAt == request.time
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          "status",
-          "redeemedByUid",
-          "redeemedEmail",
-          "redeemedAt"
+          "status", "redeemedByUid", "redeemedEmail", "redeemedAt"
         ])
       );
     }
