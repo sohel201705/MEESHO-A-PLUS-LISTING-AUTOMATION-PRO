@@ -71,7 +71,7 @@ service cloud.firestore {
       allow list, create, update, delete: if isAdmin();
     }
 
-    // Email is the customer/account primary key. Firebase UID is metadata only.
+    // EMAIL IS THE CUSTOMER ACCOUNT KEY. Firebase UID is metadata/device identity only; membership is never selected by UID.
     match /customers/{emailId} {
       allow get: if isAdmin() || sameEmail(emailId);
       allow list: if isAdmin();
@@ -123,9 +123,9 @@ service cloud.firestore {
 
       allow update: if isAdmin()
         || (
+          // Profile/session updates are email-owned. UID may change on another device.
           sameEmail(emailId)
           && request.resource.data.email == resource.data.email
-          && request.resource.data.uid == request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             "name",
             "displayName",
