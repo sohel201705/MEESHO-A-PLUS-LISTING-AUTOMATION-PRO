@@ -9,7 +9,10 @@ service cloud.firestore {
 
         function isAdmin() {
       return signedIn()
-        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
+        && (
+          request.auth.uid == "m7pkPGN62YMWfPr7ftbSMw3jv052"
+          || get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true
+        );
     }
 
     function sameEmail(emailId) {
@@ -140,7 +143,11 @@ service cloud.firestore {
           && request.resource.data.status == "ACTIVE"
           && request.resource.data.source == "ACTIVATION_KEY"
           && request.resource.data.activationKeyId is string
-          && request.resource.data.activationKeyId != resource.data.activationKeyId
+          && (
+            resource.data.status != "ACTIVE"
+            || !(resource.data.activationKeyId is string)
+            || request.resource.data.activationKeyId != resource.data.activationKeyId
+          )
           && keyAfter(request.resource.data.activationKeyId).data.status == "REDEEMED"
           && keyAfter(request.resource.data.activationKeyId).data.targetEmail == request.auth.token.email
           && keyAfter(request.resource.data.activationKeyId).data.redeemedEmail == request.auth.token.email

@@ -1,119 +1,13 @@
-# MEESHO A+ LISTING AUTOMATION PRO — Firebase/GitHub Setup
+# Firebase Extension Auth Bridge
 
-## Admin authorization
+This GitHub Pages package now includes `extension-auth.html` and `extension-auth.js`.
+The Chrome extension loads this page inside its MV3 offscreen document to complete Google sign-in with Firebase.
 
-The signed-in Google account is authorized when its own Firestore document exists at `admins/{uid}` with `active: true`. The panel does not hard-code an Admin UID.
+## Firebase Console
+1. Authentication → Sign-in method → Google must be enabled.
+2. Authentication → Settings → Authorized domains must include `sohel201705.github.io`.
+3. After loading the unpacked extension, copy its Extension ID from `chrome://extensions` and add the extension URI/domain required by Firebase's Chrome-extension authentication guide.
+4. Firestore Rules must be updated with the secure rules supplied inside the extension package.
 
-```text
-active: true
-name: "Sohel Enterprise"
-role: "admin"
-```
-
-## GitHub Pages files
-
-Upload these files to the repository root:
-
-```text
-index.html
-admin.js
-styles.css
-firebase-config.js
-extension-auth.html
-extension-auth.js
-firestore.rules
-```
-
-`index.html` is the Admin Panel entry point.
-
-## Final Admin menu
-
-```text
-Dashboard
-Users
-Plans
-Activation Keys
-Memberships
-Devices
-Settings
-```
-
-There is no Payments menu and no Promo Codes menu in this final build.
-
-## Final plan schema
-
-Only these plan fields are used:
-
-```text
-name
-price
-offerPrice
-durationDays
-active
-displayOrder
-shippingEnabled
-deviceLimit
-```
-
-All plans are expected to use:
-
-```text
-deviceLimit = 3
-shippingEnabled = true
-```
-
-Lifetime uses:
-
-```text
-durationDays = 0
-```
-
-## Final settings schema
-
-```text
-appName
-brandName
-supportName
-supportEmail
-supportPhone
-whatsapp
-paymentMode
-```
-
-Default values:
-
-```text
-appName: MEESHO A+ LISTING AUTOMATION PRO
-brandName: Sohel Enterprise
-supportName: Sohel Rana
-supportEmail: sohelenterpriseofficial@gmail.com
-supportPhone: 9064827025
-whatsapp: 919064827025
-paymentMode: WHATSAPP_MANUAL
-```
-
-## Activation flow
-
-```text
-Admin searches or enters Gmail
-        ↓
-Admin selects plan
-        ↓
-Activation Key generated
-        ↓
-Copy / WhatsApp
-        ↓
-Customer logs in with same Google Gmail
-        ↓
-Customer enters one-time key
-        ↓
-Key is redeemed in the same atomic operation as membership creation
-        ↓
-Membership ACTIVE
-        ↓
-Autofill + Shipping + 3 devices
-```
-
-## Important
-
-The separate Extension V6 package contains the original Meesho automation files plus the email-primary membership gateway and WhatsApp plan flow.
+## Payment approval
+The updated Admin Panel approval flow now creates/updates `memberships/{uid}` using the selected plan's duration, then marks the payment approved and updates the user record.

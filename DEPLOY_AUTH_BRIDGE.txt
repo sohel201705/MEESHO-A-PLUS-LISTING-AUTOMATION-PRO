@@ -1,0 +1,11 @@
+MEESHO A+ LISTING AUTOMATION PRO — GitHub Pages auth bridge
+
+Upload these files to the ROOT of the GitHub Pages site:
+- extension-auth.html
+- extension-auth.js
+
+Do not place them inside a subfolder.
+The extension expects:
+https://sohel201705.github.io/MEESHO-A-PLUS-LISTING-AUTOMATION-PRO/extension-auth.html
+
+firebase-config.js must remain in the same root directory.
