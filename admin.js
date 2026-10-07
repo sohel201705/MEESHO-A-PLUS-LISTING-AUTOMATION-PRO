@@ -7,7 +7,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
-const ADMIN_UID = "ANzaRtHgkJXlcPO8NmhzuAJ0b5C3";
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = v => Number.isFinite(Number(v)) ? `₹${Number(v).toLocaleString('en-IN')}` : '—';
@@ -17,47 +16,160 @@ const ts = v => { const d = new Date(v); return Number.isNaN(d.getTime()) ? null
 function nav(id){ document.querySelectorAll('.section').forEach(x=>x.classList.add('hidden')); $(id)?.classList.remove('hidden'); document.querySelectorAll('.nav').forEach(x=>x.classList.toggle('active',x.dataset.section===id)); }
 function badge(v){ const s=String(v||'UNKNOWN').toUpperCase(); const c=s==='ACTIVE'||s==='AVAILABLE'?'active':s==='EXPIRED'||s==='SUSPENDED'||s==='REVOKED'?'expired':'pending'; return `<span class="badge ${c}">${esc(s)}</span>`; }
 function toast(m,t='success'){ document.querySelector('.toast')?.remove(); const e=document.createElement('div'); e.className=`toast ${t}`; e.textContent=m; document.body.appendChild(e); setTimeout(()=>e.remove(),2800); }
-async function adminOK(u){ if(!u) return false; const s=await getDoc(doc(db,'admins',u.uid)); return s.exists() && s.data().active===true && u.uid===ADMIN_UID; }
+async function adminOK(u){
+  if(!u) return false;
+  const s = await getDoc(doc(db,'admins',u.uid));
+  return s.exists() && s.data().active === true;
+}
 
 async function deleteSubcollection(parentCollection, parentId, subcollection){
   const snap = await getDocs(query(collection(db,parentCollection,parentId,subcollection),limit(500)));
   await Promise.all(snap.docs.map(d=>deleteDoc(d.ref)));
 }
-async function deleteCollection(name){
-  const snap = await getDocs(query(collection(db,name),limit(500)));
-  for(const d of snap.docs){
-    if(name==='customers') await deleteSubcollection('customers', d.id, 'devices');
-    if(name==='devices') await deleteSubcollection('devices', d.id, 'sessions');
+
+// ---------------- FACTORY DATABASE CONTROL ----------------
+// Firebase client SDK cannot safely discover arbitrary root collections.
+// Therefore the reset covers every collection used by this product and
+// all known legacy collections. The admins collection is NEVER touched.
+const MANAGED_COLLECTIONS = [
+  'customers',
+  'plans',
+  'activationKeys',
+  'settings',
+  'users',
+  'memberships',
+  'devices',
+  'payments',
+  'promoCodes',
+  'schema',
+  'subscriptions',
+  'licenses',
+  'sessions',
+  'profiles',
+  'orders'
+];
+
+async function deleteAllDocsInCollection(name){
+  while(true){
+    const snap = await getDocs(query(collection(db,name),limit(500)));
+    if(snap.empty) break;
+
+    for(const d of snap.docs){
+      if(name === 'customers'){
+        await deleteAllDocsInSubcollection('customers', d.id, 'devices');
+      }
+      if(name === 'devices'){
+        await deleteAllDocsInSubcollection('devices', d.id, 'sessions');
+      }
+    }
+
+    await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
   }
-  await Promise.all(snap.docs.map(d=>deleteDoc(d.ref)));
 }
 
-async function initializeDatabase(){
-  const now = serverTimestamp();
-  await Promise.all([
-    setDoc(doc(db,'customers','_meta'),{system:true,collection:'customers',updatedAt:now},{merge:true}),
-    setDoc(doc(db,'plans','_meta'),{system:true,collection:'plans',updatedAt:now},{merge:true}),
-    setDoc(doc(db,'activationKeys','_meta'),{system:true,collection:'activationKeys',updatedAt:now},{merge:true}),
-    setDoc(doc(db,'settings','general'),{appName:'MEESHO A+ LISTING AUTOMATION PRO',brandName:'Sohel Enterprise',supportName:'Sohel Rana',updatedAt:now},{merge:true})
-  ]);
-  const defaults=[['monthly','Monthly',30,1],['yearly','Yearly',365,2],['lifetime','Lifetime',0,3]];
-  for(const [id,name,days,order] of defaults){
-    const s=await getDoc(doc(db,'plans',id));
-    if(!s.exists()) await setDoc(doc(db,'plans',id),{name,price:0,offerPrice:0,durationDays:days,displayOrder:order,deviceLimit:3,shippingEnabled:true,active:true,createdAt:now,updatedAt:now});
+async function deleteAllDocsInSubcollection(parentCollection,parentId,subcollection){
+  while(true){
+    const snap = await getDocs(query(collection(db,parentCollection,parentId,subcollection),limit(500)));
+    if(snap.empty) break;
+    await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
   }
-  toast('Clean database structure is ready.');
+}
+
+async function initializeDatabase(showToast=true){
+  const now = serverTimestamp();
+
+  // Core system documents.
+  await Promise.all([
+    setDoc(doc(db,'customers','_meta'),{
+      system:true,
+      collection:'customers',
+      idStrategy:'normalized-email',
+      membershipKey:'email',
+      updatedAt:now
+    },{merge:true}),
+
+    setDoc(doc(db,'plans','_meta'),{
+      system:true,
+      collection:'plans',
+      updatedAt:now
+    },{merge:true}),
+
+    setDoc(doc(db,'activationKeys','_meta'),{
+      system:true,
+      collection:'activationKeys',
+      binding:'targetEmail',
+      updatedAt:now
+    },{merge:true}),
+
+    setDoc(doc(db,'settings','general'),{
+      appName:'MEESHO A+ LISTING AUTOMATION PRO',
+      brandName:'Sohel Enterprise',
+      supportName:'Sohel Rana',
+      supportPhone:'9064827025',
+      whatsapp:'919064827025',
+      supportEmail:'sohelenterpriseofficial@gmail.com',
+      membershipVerification:'EMAIL_PRIMARY',
+      paymentMode:'WHATSAPP_MANUAL',
+      updatedAt:now
+    },{merge:true})
+  ]);
+
+  const defaults=[
+    ['monthly','Monthly',30,1],
+    ['yearly','Yearly',365,2],
+    ['lifetime','Lifetime',0,3]
+  ];
+
+  for(const [id,name,days,order] of defaults){
+    const ref=doc(db,'plans',id);
+    const snap=await getDoc(ref);
+    if(!snap.exists() || snap.data().system){
+      await setDoc(ref,{
+        name,
+        price:0,
+        offerPrice:0,
+        durationDays:days,
+        displayOrder:order,
+        deviceLimit:3,
+        shippingEnabled:true,
+        active:true,
+        createdAt:now,
+        updatedAt:now
+      },{merge:true});
+    }
+  }
+
+  if(showToast) toast('Database integration completed. Core structure is ready.');
   await refreshAll();
 }
 
-async function cleanLegacyAndInitialize(){
-  const ok=confirm('This will DELETE all non-admin legacy data: users, customers, plans, activationKeys, memberships, devices, payments, promoCodes, settings and schema. The admins collection will NOT be touched. Continue?');
+async function factoryResetDatabase(){
+  const ok=confirm(
+    'FACTORY RESET\\n\\n' +
+    'This will permanently delete ALL managed product data, including customers, plans, activation keys, settings and legacy collections.\\n\\n' +
+    'The admins collection will NOT be touched.\\n\\n' +
+    'Continue?'
+  );
   if(!ok) return;
+
   try{
-    const legacy=['users','customers','plans','activationKeys','memberships','devices','payments','promoCodes','settings','schema'];
-    for(const c of legacy) await deleteCollection(c);
-    await initializeDatabase();
-    toast('Legacy data removed and new structure initialized.');
-  }catch(e){ console.error(e); toast(e.message||'Cleanup failed.','error'); }
+    const btn=$('resetDb');
+    if(btn){btn.disabled=true;btn.textContent='RESETTING…';}
+
+    for(const name of MANAGED_COLLECTIONS){
+      await deleteAllDocsInCollection(name);
+    }
+
+    toast('Database cleared. Admin accounts were preserved.');
+    await initializeDatabase(false);
+    toast('Database rebuilt successfully.');
+  }catch(e){
+    console.error(e);
+    toast(e?.message || 'Factory reset failed.','error');
+  }finally{
+    const btn=$('resetDb');
+    if(btn){btn.disabled=false;btn.textContent='Factory Reset';}
+  }
 }
 
 async function loadDashboard(){
@@ -70,8 +182,8 @@ async function loadDashboard(){
   let active=0,expired=0,lifetime=0,available=0,redeemed=0;
   customers.forEach(s=>{const d=s.data();const st=String(d.status||'').toUpperCase(); if(st==='ACTIVE'){const life=Number(d.durationDays||0)===0;const exp=d.expiryDate?.toDate?d.expiryDate.toDate():d.expiryDate?new Date(d.expiryDate):null;if(life||!exp||exp>Date.now())active++;else expired++;if(life)lifetime++;} else if(st==='EXPIRED') expired++;});
   keys.forEach(s=>{const st=String(s.data().status||'').toUpperCase();if(st==='AVAILABLE')available++;if(st==='REDEEMED')redeemed++;});
-  $('dashboard').innerHTML=`<div class="page-head"><div><h2>Dashboard</h2><p class="muted">Email-primary membership system</p></div><div class="head-actions"><button id="initDb" class="primary compact-btn">Initialize</button><button id="cleanDb" class="danger-outline compact-btn">Clean Legacy Data</button></div></div><div class="grid"><div class="stat"><span>Customers</span><b>${customers.length}</b></div><div class="stat"><span>Active Members</span><b>${active}</b></div><div class="stat"><span>Expired</span><b>${expired}</b></div><div class="stat"><span>Lifetime</span><b>${lifetime}</b></div><div class="stat"><span>Available Keys</span><b>${available}</b></div><div class="stat"><span>Redeemed Keys</span><b>${redeemed}</b></div><div class="stat"><span>Active Plans</span><b>${plans.filter(s=>s.data().active!==false).length}</b></div><div class="stat"><span>Device Model</span><b>Email</b></div></div><div class="schema-panel"><strong>Source of truth</strong><div class="inline-note">Customer ID = normalized email. Devices live under customers/{email}/devices. Firebase UID is metadata only and is never the membership key.</div></div>`;
-  $('initDb').onclick=initializeDatabase; $('cleanDb').onclick=cleanLegacyAndInitialize;
+  $('dashboard').innerHTML=`<div class="page-head"><div><h2>Dashboard</h2><p class="muted">Email-primary membership system</p></div><div class="head-actions"><button id="initDb" class="primary compact-btn">Integrate / Rebuild</button><button id="resetDb" class="danger-outline compact-btn">Factory Reset</button></div></div><div class="grid"><div class="stat"><span>Customers</span><b>${customers.length}</b></div><div class="stat"><span>Active Members</span><b>${active}</b></div><div class="stat"><span>Expired</span><b>${expired}</b></div><div class="stat"><span>Lifetime</span><b>${lifetime}</b></div><div class="stat"><span>Available Keys</span><b>${available}</b></div><div class="stat"><span>Redeemed Keys</span><b>${redeemed}</b></div><div class="stat"><span>Active Plans</span><b>${plans.filter(s=>s.data().active!==false).length}</b></div><div class="stat"><span>Device Model</span><b>Email</b></div></div><div class="schema-panel"><strong>Source of truth</strong><div class="inline-note">Customer ID = normalized email. Devices live under customers/{email}/devices. Firebase UID is metadata only. Membership is verified ONLY against the normalized Gmail/email.</div></div>`;
+  $('initDb').onclick=()=>initializeDatabase(true); $('resetDb').onclick=factoryResetDatabase;
 }
 
 async function loadCustomers(){

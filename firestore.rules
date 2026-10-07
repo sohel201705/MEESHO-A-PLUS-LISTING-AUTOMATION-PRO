@@ -7,10 +7,9 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Current authorized Admin UID from the existing Admin Panel.
-    function isAdmin() {
+        function isAdmin() {
       return signedIn()
-        && request.auth.uid == "ANzaRtHgkJXlcPO8NmhzuAJ0b5C3";
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
     }
 
     function sameEmail(emailId) {
@@ -67,7 +66,7 @@ service cloud.firestore {
     }
 
     match /admins/{uid} {
-      allow get: if isAdmin() && uid == request.auth.uid;
+      allow get: if signedIn() && uid == request.auth.uid;
       allow list, create, update, delete: if isAdmin();
     }
 
@@ -113,11 +112,12 @@ service cloud.firestore {
         && request.resource.data.offerPrice == keyAfter(request.resource.data.activationKeyId).data.offerPrice
         && request.resource.data.durationDays == keyAfter(request.resource.data.activationKeyId).data.durationDays
         && request.resource.data.deviceLimit == keyAfter(request.resource.data.activationKeyId).data.deviceLimit
-        && request.resource.data.startDate == request.time
+        && request.resource.data.startDate <= request.time
+        && request.resource.data.startDate >= request.time - duration.value(10, "m")
         && (
           request.resource.data.durationDays == 0
             ? request.resource.data.expiryDate == null
-            : request.resource.data.expiryDate == request.time + duration.value(request.resource.data.durationDays, "d")
+            : request.resource.data.expiryDate == request.resource.data.startDate + duration.value(request.resource.data.durationDays, "d")
         )
       );
 
