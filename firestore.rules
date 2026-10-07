@@ -1,3 +1,7 @@
+// V7.2 CLIENT CONTRACT: customer activation is self-service after exact Gmail + valid key verification.
+// The extension uses CREATE for a first-time customers/{email} document and UPDATE for an existing one.
+// No admin approval or admin UID is required for customer activation.
+
 rules_version = '2';
 
 service cloud.firestore {
